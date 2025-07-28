@@ -1,804 +1,879 @@
-# Ollama to OpenAI Proxy Service - Architecture Document
+# Ollama-to-OpenAI Proxy Service Architecture Document
 
-## 1. System Overview
+## Introduction
 
-### 1.1 Architecture Goals
-- **Transparency**: Act as a seamless proxy between Ollama SDK and OpenAI API
-- **Simplicity**: Minimal components with clear responsibilities (KISS principle)
-- **Performance**: Low latency overhead with efficient streaming support
-- **Maintainability**: Clean separation of concerns with testable components
+This document outlines the overall project architecture for Ollama-to-OpenAI Proxy Service, including backend systems, shared services, and non-UI specific concerns. Its primary goal is to serve as the guiding architectural blueprint for AI-driven development, ensuring consistency and adherence to chosen patterns and technologies.
 
-### 1.2 Core Development Principles
-```
-CRITICAL PRINCIPLES FOR ALL DEVELOPMENT:
+**Relationship to Frontend Architecture:**
+If the project includes a significant user interface, a separate Frontend Architecture Document will detail the frontend-specific design and MUST be used in conjunction with this document. Core technology stack choices documented herein (see "Tech Stack") are definitive for the entire project, including any frontend components.
 
-1. KISS (Keep It Simple, Stupid)
-   - Choose the simplest solution that works
-   - Avoid over-engineering
-   - If it's not needed NOW, don't build it
-   
-2. YAGNI (You Aren't Gonna Need It)
-   - Build ONLY what the current story requires
-   - No "future-proofing" features
-   - No "while we're at it" additions
-   - If PRD doesn't require it, don't implement it
+### Starter Template or Existing Project
 
-3. Story-Driven Development
-   - Each story defines its exact scope
-   - Implement ONLY what's in the story
-   - Future features belong in future stories
-   
-Example:
-❌ "Let's add caching while implementing /api/generate"
-✅ "Story says implement /api/generate. No caching mentioned. Skip it."
+N/A - This is a greenfield project built from scratch without any starter template.
 
-❌ "This could be useful later for multi-tenancy"
-✅ "Current story is single-tenant. Implement single-tenant only."
-```
+### Change Log
 
-### 1.3 High-Level Architecture
+| Date | Version | Description | Author |
+|------|---------|-------------|--------|
+| 2025-01-28 | 1.0 | Initial architecture document | Winston (Architect) |
 
-```
-┌─────────────────┐     ┌──────────────────────────────────────┐     ┌─────────────────┐
-│   Ollama SDK    │────▶│       Ollama-OpenAI Proxy            │────▶│   OpenAI API    │
-│   Python Client │     │  ┌────────────┐  ┌────────────────┐ │     │                 │
-└─────────────────┘     │  │  FastAPI   │  │  Translation   │ │     └─────────────────┘
-                        │  │  Server     │──│     Layer      │ │
-                        │  └────────────┘  └────────────────┘ │
-                        │         │                │           │
-                        │         ▼                ▼           │
-                        │  ┌────────────┐  ┌────────────────┐ │
-                        │  │   Request  │  │  OpenAI SDK    │ │
-                        │  │  Validator │  │    Client      │ │
-                        │  └────────────┘  └────────────────┘ │
-                        └──────────────────────────────────────┘
-```
+## High Level Architecture
 
-## 2. Component Architecture
+### Technical Summary
 
-### 2.1 FastAPI Server Layer
+The Ollama-to-OpenAI Proxy Service implements a monolithic REST API translation layer that enables zero-code migration from Ollama to OpenAI-compatible services. Built with FastAPI and Python 3.12, it provides transparent proxy functionality maintaining full Ollama SDK compatibility through request/response translation patterns. The architecture follows KISS principles, avoiding unnecessary complexity while ensuring < 50ms proxy overhead and supporting 100+ concurrent requests. This design directly supports the PRD goal of allowing teams to leverage cloud-scale LLM services without modifying existing Ollama-based codebases.
 
-#### 2.1.1 Endpoints Implementation
-```python
-# Core endpoints structure
-app = FastAPI(title="Ollama-OpenAI Proxy")
+### High Level Overview
 
-@app.get("/api/tags")
-async def list_models() -> OllamaTagsResponse
+1. **Architectural Style**: Monolithic REST API Service with Translation Layer
+2. **Repository Structure**: Monorepo (as per PRD requirement)
+3. **Service Architecture**: Single monolithic service handling all proxy functionality
+4. **Primary Data Flow**: 
+   - Ollama SDK Client → HTTP Request → Proxy Service (port 11434)
+   - Request Translation Layer → OpenAI API Client
+   - OpenAI Response → Response Translation Layer → Ollama Format Response
+5. **Key Architectural Decisions**:
+   - Monolithic design for simplicity and reduced operational complexity
+   - Stateless service design for horizontal scalability
+   - In-memory request/response translation without persistence
+   - Direct API-to-API translation without caching layer
 
-@app.post("/api/generate")
-async def generate(request: OllamaGenerateRequest) -> OllamaGenerateResponse
-
-@app.post("/api/chat")
-async def chat(request: OllamaChatRequest) -> OllamaChatResponse
-
-@app.post("/api/embeddings")
-async def embeddings(request: OllamaEmbeddingsRequest) -> OllamaEmbeddingsResponse
-```
-
-#### 2.1.2 Request/Response Models
-```python
-# Pydantic models for type safety and validation
-class OllamaGenerateRequest(BaseModel):
-    model: str
-    prompt: str
-    stream: bool = False
-    options: Optional[Dict[str, Any]] = None
-    
-class OllamaTagsResponse(BaseModel):
-    models: List[ModelInfo]
-    
-class ModelInfo(BaseModel):
-    name: str
-    size: int = 0  # Dummy value
-    digest: str = "unknown"
-    modified_at: str
-```
-
-### 2.2 Translation Layer
-
-#### 2.2.1 Pydantic Model Generation (CRITICAL FIRST STEP)
-```
-IMPORTANT: All Ollama API models MUST be generated from the Postman collection
-- Reference: docs/Ollama REST API.postman_collection.json
-- Do NOT hand-write these models
-- Use the Postman examples to generate accurate Pydantic models
-- Must match exactly what Ollama SDK sends/expects
-- Any mismatch will cause integration test failures
-- This is the FIRST development story
-```
-
-#### 2.2.2 Request Translation
-```python
-class RequestTranslator:
-    """Converts Ollama requests to OpenAI format"""
-    
-    def translate_generate_request(self, ollama_req: OllamaGenerateRequest) -> OpenAICompletionRequest:
-        # Parameter mapping with logging for unsupported params
-        
-    def translate_chat_request(self, ollama_req: OllamaChatRequest) -> OpenAIChatRequest:
-        # Message format conversion
-        
-    def translate_embedding_request(self, ollama_req: OllamaEmbeddingRequest) -> OpenAIEmbeddingRequest:
-        # Batch handling and format conversion
-```
-
-#### 2.2.2 Response Translation
-```python
-class ResponseTranslator:
-    """Converts OpenAI responses to Ollama format"""
-    
-    def translate_completion_response(self, openai_resp: OpenAIResponse) -> OllamaGenerateResponse:
-        # Format response with proper field mapping
-        
-    def translate_chat_response(self, openai_resp: OpenAIChatResponse) -> OllamaChatResponse:
-        # Handle message structure differences
-        
-    def translate_models_list(self, openai_models: List[OpenAIModel]) -> OllamaTagsResponse:
-        # Create Ollama-compatible model list with dummy metadata
-```
-
-#### 2.2.3 Parameter Mapping Table
-| Ollama Parameter | OpenAI Parameter | Notes |
-|-----------------|------------------|-------|
-| `num_predict` | `max_tokens` | Direct mapping |
-| `temperature` | `temperature` | Direct mapping |
-| `top_p` | `top_p` | Direct mapping |
-| `repeat_penalty` | `frequency_penalty` | Requires value adjustment |
-| `repeat_last_n` | - | Log warning, no equivalent |
-| `top_k` | - | Log warning, no equivalent |
-| `seed` | `seed` | If supported by model |
-| `stop` | `stop` | Array format |
-| `tfs_z` | - | Log warning, no equivalent |
-| `num_ctx` | - | Log warning, context handled differently |
-
-### 2.3 OpenAI Client Integration
-
-#### 2.3.1 Client Configuration
-```python
-class OpenAIClientWrapper:
-    def __init__(self):
-        self.client = OpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1")
-        )
-        
-    async def list_models(self) -> List[Model]:
-        return await self.client.models.list()
-        
-    async def create_completion(self, **kwargs) -> CompletionResponse:
-        return await self.client.completions.create(**kwargs)
-```
-
-#### 2.3.2 Streaming Handler
-```python
-class StreamingHandler:
-    """Handles streaming responses with format conversion"""
-    
-    async def stream_generate_response(self, openai_stream):
-        async for chunk in openai_stream:
-            # Convert OpenAI chunk to Ollama format
-            yield self.format_ollama_chunk(chunk)
-            
-    def format_ollama_chunk(self, openai_chunk) -> str:
-        # Return JSON lines format expected by Ollama SDK
-        return json.dumps({
-            "model": openai_chunk.model,
-            "created_at": datetime.utcnow().isoformat(),
-            "response": openai_chunk.choices[0].delta.content or "",
-            "done": openai_chunk.choices[0].finish_reason is not None
-        })
-```
-
-## 3. Data Flow Architecture
-
-### 3.1 Request Flow
-```
-1. Ollama SDK sends request to proxy
-2. FastAPI validates request structure
-3. RequestTranslator converts to OpenAI format
-   - Maps parameters
-   - Logs warnings for unsupported params
-4. OpenAIClient sends request to OpenAI API
-5. Response flows back through ResponseTranslator
-6. FastAPI returns Ollama-formatted response
-```
-
-### 3.2 Streaming Flow
-```
-1. Detect stream=true in request
-2. Establish SSE connection with client
-3. Create streaming request to OpenAI
-4. Transform each chunk in real-time
-5. Send formatted chunks to client
-6. Close connection on completion
-```
-
-## 4. Error Handling Architecture
-
-### 4.1 Error Translation Map
-```python
-ERROR_MAPPING = {
-    # OpenAI Error -> Ollama Error
-    "invalid_api_key": (401, "Invalid API key"),
-    "model_not_found": (404, "Model not found"),
-    "rate_limit_exceeded": (429, "Rate limit exceeded"),
-    "invalid_request_error": (400, "Bad request"),
-    "server_error": (500, "Internal server error"),
-}
-```
-
-### 4.2 Error Handler Implementation
-```python
-class ErrorHandler:
-    def translate_openai_error(self, openai_error: OpenAIError) -> OllamaError:
-        error_type = openai_error.type
-        status_code, message = ERROR_MAPPING.get(
-            error_type, 
-            (500, f"Unexpected error: {openai_error.message}")
-        )
-        
-        return OllamaError(
-            error=message,
-            status_code=status_code
-        )
-```
-
-### 4.3 Phase 1 Error Handling Approach
-```
-IMPORTANT: Following KISS/YAGNI principles for Phase 1:
-
-- Simple error translation as shown above
-- Direct pass-through of OpenAI errors with mapping
-- No circuit breakers (Phase 2 feature)
-- No retry logic beyond max_retries config
-- No complex fallback mechanisms
-
-If OpenAI is down:
-- Return appropriate error to client
-- Let client handle retry logic
-- Log the error for monitoring
-
-This approach keeps Phase 1 simple and focused on core proxy functionality.
-```
-
-## 5. Configuration Architecture
-
-### 5.1 Environment Configuration
-```python
-class Config:
-    """Application configuration from environment"""
-    
-    # OpenAI Configuration
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
-    openai_base_url: str = Field(default="https://api.openai.com/v1", env="OPENAI_API_BASE_URL")
-    default_model: str = Field(default="gpt-3.5-turbo", env="DEFAULT_MODEL")
-    
-    # Server Configuration
-    port: int = Field(default=11434, env="PORT")  # Ollama default
-    host: str = Field(default="0.0.0.0", env="HOST")
-    
-    # Logging Configuration
-    log_level: str = Field(default="INFO", env="LOG_LEVEL")
-    log_format: str = Field(default="json", env="LOG_FORMAT")
-    
-    # Request Configuration
-    request_timeout: int = Field(default=600, env="REQUEST_TIMEOUT")
-    max_retries: int = Field(default=3, env="MAX_RETRIES")
-```
-
-### 5.2 Logging Architecture
-```python
-# SIMPLE structured logging - no complex logging frameworks
-logger = structlog.get_logger()
-
-# Log only what's needed for debugging and monitoring
-# No "might be useful" logs
-
-# Required logs:
-# - Parameter translation warnings
-# - API errors
-# - Request/response (if debugging)
-
-# NOT required (don't implement):
-# - Performance metrics (Phase 2)
-# - Detailed tracing (not in requirements)
-# - Analytics (not in requirements)
-```
-
-## 6. Testing Architecture
-
-### 6.1 Integration Test Structure
-```python
-class OllamaSDKIntegrationTests:
-    """Tests using actual Ollama SDK as client"""
-    
-    def setup(self):
-        # Configure Ollama SDK to point to proxy
-        self.client = ollama.Client(host="http://localhost:11434")
-        
-    async def test_generate_compatibility(self):
-        # Test all Ollama SDK generate features
-        
-    async def test_streaming_compatibility(self):
-        # Verify streaming works with SDK
-        
-    async def test_parameter_handling(self):
-        # Ensure warnings logged for unsupported params
-```
-
-### 6.2 Unit Test Structure
-```python
-# Component-level testing
-- test_request_translator.py
-- test_response_translator.py  
-- test_parameter_mapping.py
-- test_error_handling.py
-- test_streaming_handler.py
-```
-
-## 7. Deployment Architecture
-
-### 7.1 Container Structure
-```dockerfile
-FROM python:3.11-slim
-
-# Install dependencies
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-# Copy application
-COPY ./app /app
-
-# Run with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "11434"]
-```
-
-### 7.2 Docker Compose Example
-```yaml
-version: '3.8'
-services:
-  ollama-proxy:
-    build: .
-    ports:
-      - "11434:11434"
-    env_file:
-      - .env
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-```
-
-### 7.3 Deployment and Rollback Strategy
-```
-IMPORTANT: Following KISS principle for Phase 1
-
-Deployment and rollback procedures will be:
-- Defined by the Scrum Master (SM) and Development team
-- Based on the specific infrastructure and constraints
-- Documented as part of the deployment story
-- NOT pre-architected in this document
-
-This allows flexibility for the team to choose the most appropriate approach
-based on their actual deployment environment (cloud provider, on-prem, etc.)
-
-Basic requirements:
-- Container-based deployment using Docker
-- Environment-based configuration
-- Health check endpoint for monitoring
-- Simple restart capability
-
-The SM and DEV team will determine:
-- Specific deployment procedures
-- Rollback mechanisms
-- Version tagging strategy
-- Environment-specific configurations
-```
-
-## 8. Performance Considerations
-
-### 8.1 Optimization Strategies
-- **Connection Pooling**: Reuse OpenAI client connections
-- **Async Processing**: Full async/await implementation
-- **Minimal Overhead**: Direct streaming without buffering
-- **Efficient JSON Parsing**: Use orjson for performance
-
-### 8.2 Resource Requirements
-- **Memory**: ~100MB base + request overhead
-- **CPU**: Minimal, mostly I/O bound
-- **Network**: Low latency to OpenAI API endpoint
-- **Disk**: Minimal, only for logs
-
-## 9. Security Architecture
-
-### 9.1 API Key Handling
-- Store API keys in environment variables only
-- Never log API keys
-- Validate API key format on startup
-- Support key rotation without restart
-
-### 9.2 Request Validation
-- Validate all input parameters
-- Sanitize model names
-- Prevent injection attacks
-- Rate limiting (Phase 2)
-
-## 10. Monitoring Architecture (Phase 2)
-
-### 10.1 Metrics to Track
-```python
-# Prometheus metrics
-request_count = Counter('ollama_proxy_requests_total', 'Total requests', ['endpoint', 'model'])
-request_duration = Histogram('ollama_proxy_request_duration_seconds', 'Request duration', ['endpoint'])
-error_count = Counter('ollama_proxy_errors_total', 'Total errors', ['endpoint', 'error_type'])
-active_connections = Gauge('ollama_proxy_active_connections', 'Active connections')
-```
-
-### 10.2 Health Check Endpoint (Phase 1)
-```python
-@app.get("/health")
-async def health_check():
-    """
-    PHASE 1: Basic health check for Docker only
-    - No OpenAI connection verification
-    - No resource checking
-    - Just return 200 OK
-    """
-    return {"status": "healthy"}
-
-# That's it. KISS principle.
-# Phase 2 can add connection checks, metrics, etc.
-```
-
-## 11. Development Guidelines
-
-### 11.1 Development Environment Requirements
-```bash
-# IMPORTANT: Development environment specifications
-# OS: Linux only (Ubuntu 22.04 LTS recommended)
-# Python: 3.12 (exact version required)
-# Package Management: venv (virtual environment)
-
-# Setup commands for developers
-python3.12 -m venv venv
-source venv/bin/activate  # ALWAYS activate venv before any Python work
-pip install -r requirements.txt
-pip install -r requirements-dev.txt  # Development dependencies
-```
-
-### 11.2 Code Structure
-```
-ollama-openai-proxy/
-├── app/
-│   ├── main.py              # FastAPI app entry point
-│   ├── config.py            # Configuration management
-│   ├── models/              # Pydantic models for validation
-│   ├── translators/         # Translation logic (core business logic)
-│   ├── handlers/            # Request handlers for each endpoint
-│   ├── clients/             # OpenAI client wrapper
-│   └── utils/               # Shared utilities and helpers
-├── tests/
-│   ├── integration/         # Ollama SDK tests (MUST PASS)
-│   └── unit/               # Component tests (MUST PASS)
-├── scripts/
-│   ├── setup_dev.sh        # Development environment setup
-│   ├── run_tests.sh        # Run all tests
-│   └── run_local.sh        # Run proxy locally for testing
-├── docker/
-├── docs/
-├── .env.example             # Example environment configuration
-├── requirements.txt         # Production dependencies
-└── requirements-dev.txt     # Development dependencies (pytest, etc.)
-```
-
-### 11.3 Development Workflow - INCREMENTAL APPROACH
-
-**CRITICAL: Complete ONE API endpoint at a time, learning and updating as we go**
-
-#### Phase 0: Ollama API Contract Analysis (FIRST STORY)
-```
-PREREQUISITE: Understand Ollama's exact API contract
-
-IMPORTANT: A Postman collection is available at:
-docs/Ollama REST API.postman_collection.json
-
-This collection contains real Ollama API examples and can be used to:
-- Understand the exact request/response formats
-- Generate test fixtures from actual Ollama responses
-- Validate our Pydantic models against real API behavior
-
-Steps:
-- Review the Postman collection for all endpoint specifications
-- Generate Pydantic models from the API examples
-- Validate models against Ollama SDK expectations
-- Create test fixtures from the Postman examples
-
-This MUST be completed before ANY endpoint implementation
-Expected deliverables:
-- Validated Pydantic models matching Ollama API
-- Test fixtures for integration testing
-- Documentation of findings and edge cases
-```
-
-#### Phase 1: `/api/tags` Endpoint (Learning Phase)
-```bash
-# NOW we can implement with confidence
-# 1. Use validated Pydantic models from Phase 0
-# 2. Write comprehensive tests
-# 3. Learn from implementation challenges
-# 4. Update architecture/PRD based on learnings
-# 5. Apply lessons to next endpoint
-```
-
-#### Development Checklist for EACH Endpoint:
-```python
-# FOR SCRUM MASTER: A story is NOT complete until ALL items are checked:
-# [ ] Endpoint handler implemented
-# [ ] Request/Response models defined
-# [ ] Translation logic implemented
-# [ ] Unit tests written and PASSING
-# [ ] Integration tests with Ollama SDK PASSING
-# [ ] Error handling tested
-# [ ] Logging implemented
-# [ ] Local testing completed
-# [ ] Architecture document updated with learnings
-# [ ] Code reviewed by peer
-
-# NO STORY MOVES TO "DONE" WITHOUT PASSING TESTS!
-```
-
-### 11.4 Testing Requirements
-
-#### 11.4.1 Test Execution (ALWAYS from venv)
-```bash
-# IMPORTANT: All test commands MUST be run from activated venv
-source venv/bin/activate
-
-# Run unit tests for specific component
-pytest tests/unit/test_<component>.py -v
-
-# Run integration tests for specific endpoint
-pytest tests/integration/test_<endpoint>_integration.py -v
-
-# Run all tests (required before marking story complete)
-pytest tests/ -v --cov=app --cov-report=term-missing
-
-# Test coverage must be >80% for each component
-```
-
-#### 11.4.2 Local Testing Procedure
-```bash
-# 1. Start the proxy locally (from venv)
-source venv/bin/activate
-python -m app.main  # or use run_local.sh
-
-# 2. In another terminal, run integration tests
-source venv/bin/activate
-pytest tests/integration/ -v
-
-# 3. Manual testing with Ollama SDK
-python test_scripts/manual_ollama_test.py
-```
-
-### 11.5 Development Best Practices
-
-```python
-# IMPORTANT REMINDERS FOR DEVELOPERS:
-
-# 1. ALWAYS work in venv
-"""
-Before ANY Python command:
-$ source venv/bin/activate
-(venv) $ python ...  # Note the (venv) prefix
-"""
-
-# 2. Test-Driven Development
-"""
-- Write tests FIRST or alongside implementation
-- No code merges without tests
-- Integration tests are MANDATORY
-"""
-
-# 3. Incremental Development
-"""
-- Complete /api/tags FULLY before starting /api/generate
-- Document learnings in architecture_learnings.md
-- Update this architecture doc with discoveries
-"""
-
-# 4. Local First, CI/CD Later
-"""
-- All testing happens locally first
-- GitHub Actions CI/CD comes AFTER local success
-- No shortcuts - local must work perfectly
-"""
-
-# 5. KISS Principle Enforcement
-"""
-- Always choose the simplest working solution
-- Reject complex solutions in code reviews
-- "Clever" code is bad code
-- If you can't explain it simply, it's too complex
-"""
-
-# 6. No Premature Features
-"""
-- Build ONLY what the story specifies
-- No "might be useful later" code
-- No unused parameters or configurations
-- Delete any code not required by current stories
-"""
-```
-
-### 11.6 Code Review Checklist
-```
-For Reviewers - REJECT if:
-□ Code implements features not in the current story
-□ "Future-proofing" code that isn't currently used
-□ Complex solution when simple one would work
-□ Configuration options that aren't needed NOW
-□ Abstractions without current concrete use cases
-□ "Nice to have" additions not in requirements
-
-APPROVE only if:
-✓ Implements EXACTLY what the story requires
-✓ Uses simplest possible approach
-✓ No unused code or features
-✓ All code has a current purpose
-✓ Tests cover actual requirements only
-```
-
-### 11.6 Development Order and Learning Loop
+### High Level Project Diagram
 
 ```mermaid
-graph TD
-    A[1. Implement /api/tags] --> B[Test Thoroughly]
-    B --> C[Document Learnings]
-    C --> D[Update Architecture/PRD]
-    D --> E[2. Implement /api/generate]
-    E --> F[Apply Learnings from /api/tags]
-    F --> G[Test Thoroughly]
-    G --> H[Document New Learnings]
-    H --> I[3. Implement /api/chat]
-    I --> J[Apply All Previous Learnings]
-    J --> K[4. Implement /api/embeddings]
+graph TB
+    subgraph "Client Applications"
+        A[Ollama SDK Client]
+    end
+    
+    subgraph "Proxy Service"
+        B[FastAPI Server<br/>Port 11434]
+        C[Request Router]
+        D[Request Translator]
+        E[OpenAI Client]
+        F[Response Translator]
+        G[Error Handler]
+        H[Logger]
+    end
+    
+    subgraph "External Services"
+        I[OpenAI API]
+    end
+    
+    A -->|Ollama API Calls| B
+    B --> C
+    C --> D
+    D --> E
+    E -->|OpenAI API Calls| I
+    I -->|OpenAI Response| E
+    E --> F
+    F --> B
+    B -->|Ollama Format Response| A
+    
+    G -.->|Error Handling| B
+    H -.->|Logging| B
+    H -.->|Logging| C
+    H -.->|Logging| D
+    H -.->|Logging| E
+    H -.->|Logging| F
+    H -.->|Logging| G
 ```
 
-### 11.7 Story Definition of Done
+### Architectural and Design Patterns
 
-**FOR SCRUM MASTER - A story is DONE when:**
-1. ✅ Code implemented according to architecture
-2. ✅ All unit tests passing (from venv)
-3. ✅ Integration tests with Ollama SDK passing (from venv)
-4. ✅ Error scenarios tested and handled
-5. ✅ Logging implemented with appropriate levels
-6. ✅ Local end-to-end testing completed
-7. ✅ Architecture/PRD updated if needed
-8. ✅ Code reviewed and approved
-9. ✅ NO "we'll fix it later" items
+- **API Gateway Pattern:** Single entry point for all Ollama API requests - _Rationale:_ Simplifies client configuration and provides centralized request handling
+- **Adapter Pattern:** Request/Response translators adapt between Ollama and OpenAI formats - _Rationale:_ Clean separation of translation logic enables independent testing and maintenance
+- **Repository Pattern:** Not applicable (no database) - _Rationale:_ KISS principle, avoiding unnecessary persistence layer
+- **Dependency Injection:** FastAPI's built-in DI for OpenAI client and configuration - _Rationale:_ Enables easy testing and configuration management
+- **Streaming Response Pattern:** Server-Sent Events (SSE) for streaming endpoints - _Rationale:_ Maintains real-time performance for streaming text generation
+- **Error Translation Pattern:** Centralized error mapping between API formats - _Rationale:_ Consistent error handling and proper status code translation
 
-### 11.8 Common Development Commands
+## Tech Stack
 
-```bash
-# Development command reference (ALWAYS in venv)
+### Cloud Infrastructure
 
-# Setup new development environment
-./scripts/setup_dev.sh
+- **Provider:** On-premises deployment only
+- **Key Services:** Docker containers with docker-compose orchestration
+- **Deployment Regions:** N/A (on-premises)
 
-# Run specific endpoint locally for testing
-ENDPOINT=tags python -m app.main
+### Technology Stack Table
 
-# Run tests with coverage
-pytest --cov=app --cov-report=html
+| Category | Technology | Version | Purpose | Rationale |
+|----------|------------|---------|---------|-----------|
+| **Language** | Python | 3.12.3 | Primary development language | Specified in PRD, excellent async support |
+| **Framework** | FastAPI | 0.109.0 | REST API framework | High performance, automatic OpenAPI docs, async support |
+| **HTTP Server** | Uvicorn | 0.27.0 | ASGI server | FastAPI recommended, production-ready |
+| **HTTP Client** | httpx | 0.26.0 | Async HTTP client | Modern async support, streaming capabilities |
+| **OpenAI SDK** | openai | 1.12.0 | OpenAI API client | Official SDK, well-maintained |
+| **Validation** | Pydantic | 2.5.3 | Data validation | FastAPI integration, automatic validation |
+| **Logging** | structlog | 24.1.0 | Structured logging | JSON logging, better observability |
+| **Testing** | pytest | 8.0.0 | Test framework | Python standard, great async support |
+| **Testing** | pytest-asyncio | 0.23.3 | Async test support | Required for async endpoint testing |
+| **Code Quality** | black | 24.1.1 | Code formatter | Consistent code style |
+| **Code Quality** | flake8 | 7.0.0 | Linter | Code quality checks |
+| **Code Quality** | mypy | 1.8.0 | Type checker | Static type checking |
+| **Containerization** | Docker | 24.0.7 | Container runtime | Deployment standardization |
+| **Orchestration** | docker-compose | 2.23.3 | Container orchestration | Simple multi-container management |
+| **Environment** | python-dotenv | 1.0.0 | Environment management | .env file support |
 
-# Check code quality
-flake8 app/
-black app/ --check
-mypy app/
+**Important Note**: This table represents the DEFINITIVE technology choices. All implementation must use these exact versions to ensure consistency.
 
-# Run integration test against local instance
-./scripts/test_endpoint.sh tags
+## Data Models
 
-# View logs during development
-tail -f logs/ollama_proxy.log | jq '.'
+### Model: OllamaTagsResponse
+
+**Purpose:** Represents the response format for /api/tags endpoint listing available models
+
+**Key Attributes:**
+- models: List[OllamaModel] - List of available models
+- OllamaModel.name: str - Model identifier (e.g., "gpt-3.5-turbo")
+- OllamaModel.modified_at: str - ISO timestamp of last modification
+- OllamaModel.size: int - Model size in bytes (dummy value)
+- OllamaModel.digest: str - Model digest hash (dummy value)
+
+**Relationships:**
+- Maps from OpenAI model list response
+- No persistent storage required
+
+### Model: OllamaGenerateRequest
+
+**Purpose:** Represents the request format for /api/generate text completion endpoint
+
+**Key Attributes:**
+- model: str - Model name to use
+- prompt: str - Text prompt for generation
+- stream: bool - Whether to stream response (default: true)
+- options: Dict[str, Any] - Generation parameters (temperature, max_tokens, etc.)
+
+**Relationships:**
+- Translates to OpenAI ChatCompletion request
+- Parameter mapping required (e.g., num_predict → max_tokens)
+
+### Model: OllamaChatRequest
+
+**Purpose:** Represents the request format for /api/chat conversational endpoint
+
+**Key Attributes:**
+- model: str - Model name to use
+- messages: List[OllamaChatMessage] - Conversation history
+- stream: bool - Whether to stream response
+- options: Dict[str, Any] - Generation parameters
+
+**Relationships:**
+- Translates to OpenAI ChatCompletion with message history
+- Role mapping required (user/assistant/system)
+
+### Model: OllamaEmbeddingRequest
+
+**Purpose:** Represents the request format for /api/embeddings endpoint
+
+**Key Attributes:**
+- model: str - Model name to use
+- prompt: str | List[str] - Text(s) to embed
+- options: Dict[str, Any] - Embedding parameters
+
+**Relationships:**
+- Translates to OpenAI Embeddings request
+- Batch processing support required
+
+## Components
+
+### API Gateway
+
+**Responsibility:** Main FastAPI application handling all incoming HTTP requests on port 11434
+
+**Key Interfaces:**
+- GET /api/tags - List available models
+- POST /api/generate - Text generation endpoint
+- POST /api/chat - Chat conversation endpoint
+- POST /api/embeddings - Text embedding endpoint
+- GET /health - Health check endpoint
+
+**Dependencies:** Request Router, Error Handler, Logger
+
+**Technology Stack:** FastAPI 0.109.0, Uvicorn 0.27.0, Pydantic 2.5.3
+
+### Request Router
+
+**Responsibility:** Routes incoming Ollama API requests to appropriate handlers
+
+**Key Interfaces:**
+- route_request() - Determines handler based on endpoint
+- validate_endpoint() - Ensures endpoint is supported
+
+**Dependencies:** Endpoint Handlers, Logger
+
+**Technology Stack:** FastAPI router, Python 3.12.3
+
+### Request Translator
+
+**Responsibility:** Translates Ollama request formats to OpenAI equivalents
+
+**Key Interfaces:**
+- translate_generate_request() - Ollama generate → OpenAI completion
+- translate_chat_request() - Ollama chat → OpenAI chat
+- translate_embedding_request() - Ollama embedding → OpenAI embedding
+- map_parameters() - Parameter name/value translation
+
+**Dependencies:** Pydantic models, Logger
+
+**Technology Stack:** Pydantic 2.5.3, Python dataclasses
+
+### OpenAI Client Wrapper
+
+**Responsibility:** Manages communication with OpenAI API including error handling
+
+**Key Interfaces:**
+- list_models() - Fetch available models
+- create_completion() - Generate text completion
+- create_chat_completion() - Generate chat response
+- create_embedding() - Generate embeddings
+
+**Dependencies:** OpenAI SDK, httpx, Logger
+
+**Technology Stack:** openai 1.12.0, httpx 0.26.0
+
+### Response Translator
+
+**Responsibility:** Translates OpenAI responses back to Ollama expected formats
+
+**Key Interfaces:**
+- translate_models_response() - OpenAI models → Ollama tags
+- translate_completion_response() - OpenAI completion → Ollama generate
+- translate_chat_response() - OpenAI chat → Ollama chat
+- translate_embedding_response() - OpenAI embedding → Ollama embedding
+- format_streaming_chunk() - SSE formatting for streams
+
+**Dependencies:** Pydantic models, Logger
+
+**Technology Stack:** Pydantic 2.5.3, Python 3.12.3
+
+### Error Handler
+
+**Responsibility:** Centralized error handling and translation between API formats
+
+**Key Interfaces:**
+- handle_openai_error() - Translate OpenAI errors to Ollama format
+- handle_validation_error() - Request validation errors
+- handle_connection_error() - Network/timeout errors
+- format_error_response() - Consistent error formatting
+
+**Dependencies:** Logger
+
+**Technology Stack:** FastAPI exception handlers, structlog 24.1.0
+
+### Configuration Manager
+
+**Responsibility:** Manages environment variables and application configuration
+
+**Key Interfaces:**
+- load_config() - Load from environment/.env
+- get_openai_key() - Retrieve API key
+- get_server_config() - Port, host, worker settings
+
+**Dependencies:** python-dotenv
+
+**Technology Stack:** python-dotenv 1.0.0, Pydantic Settings
+
+### Component Diagrams
+
+```mermaid
+graph LR
+    subgraph "Endpoint Handlers"
+        A1[Tags Handler]
+        A2[Generate Handler]
+        A3[Chat Handler]
+        A4[Embeddings Handler]
+    end
+    
+    subgraph "Translation Layer"
+        B1[Request Translator]
+        B2[Response Translator]
+        B3[Parameter Mapper]
+    end
+    
+    subgraph "External Communication"
+        C1[OpenAI Client Wrapper]
+    end
+    
+    subgraph "Cross-Cutting Concerns"
+        D1[Error Handler]
+        D2[Logger]
+        D3[Config Manager]
+    end
+    
+    A1 --> B1
+    A2 --> B1
+    A3 --> B1
+    A4 --> B1
+    
+    B1 --> C1
+    C1 --> B2
+    
+    B2 --> A1
+    B2 --> A2
+    B2 --> A3
+    B2 --> A4
+    
+    B1 --> B3
+    B3 --> B1
+    
+    D1 --> A1
+    D1 --> A2
+    D1 --> A3
+    D1 --> A4
+    
+    D2 --> A1
+    D2 --> A2
+    D2 --> A3
+    D2 --> A4
+    D2 --> B1
+    D2 --> B2
+    D2 --> C1
+    
+    D3 --> C1
+    D3 --> A1
 ```
 
-## 12. CI/CD Strategy (Post-Local Development)
+## External APIs
 
-### 12.1 Local First Approach
+### OpenAI API
+
+- **Purpose:** Provides access to GPT models for text generation, chat, and embeddings
+- **Documentation:** https://platform.openai.com/docs/api-reference
+- **Base URL(s):** https://api.openai.com/v1
+- **Authentication:** Bearer token via Authorization header
+- **Rate Limits:** Varies by account tier (not enforced in Phase 1)
+
+**Key Endpoints Used:**
+- `GET /models` - List available models
+- `POST /chat/completions` - Create chat completion (used for both generate and chat)
+- `POST /embeddings` - Create embeddings
+
+**Integration Notes:** No rate limiting or circuit breaker in Phase 1 (KISS principle). API key via environment variable. Streaming responses via Server-Sent Events.
+
+## Core Workflows
+
+```mermaid
+sequenceDiagram
+    participant Client as Ollama SDK Client
+    participant Proxy as Proxy Service
+    participant Router as Request Router
+    participant ReqTrans as Request Translator
+    participant OpenAI as OpenAI Client
+    participant API as OpenAI API
+    participant RespTrans as Response Translator
+    
+    Note over Client,API: Text Generation Workflow (Streaming)
+    
+    Client->>+Proxy: POST /api/generate<br/>{model, prompt, stream: true}
+    Proxy->>+Router: Route request
+    Router->>+ReqTrans: Translate to OpenAI format
+    Note over ReqTrans: Map parameters:<br/>num_predict → max_tokens<br/>temperature → temperature
+    ReqTrans->>+OpenAI: Create chat completion request
+    OpenAI->>+API: POST /chat/completions<br/>{stream: true}
+    
+    loop Streaming chunks
+        API-->>-OpenAI: SSE chunk
+        OpenAI-->>RespTrans: OpenAI chunk
+        RespTrans-->>Proxy: Ollama format chunk
+        Proxy-->>Client: SSE response chunk
+    end
+    
+    OpenAI-->>-RespTrans: Stream complete
+    RespTrans-->>-Router: Format final response
+    Router-->>-Proxy: Complete
+    Proxy-->>-Client: Stream end
+```
+
+```mermaid
+sequenceDiagram
+    participant Client as Ollama SDK Client
+    participant Proxy as Proxy Service
+    participant Handler as Tags Handler
+    participant OpenAI as OpenAI Client
+    participant API as OpenAI API
+    participant Trans as Response Translator
+    
+    Note over Client,API: Model Listing Workflow
+    
+    Client->>+Proxy: GET /api/tags
+    Proxy->>+Handler: Handle tags request
+    Handler->>+OpenAI: List models
+    OpenAI->>+API: GET /models
+    API-->>-OpenAI: Model list
+    OpenAI-->>-Handler: OpenAI models
+    Handler->>+Trans: Translate to Ollama format
+    Note over Trans: Add dummy metadata:<br/>size, digest, modified_at
+    Trans-->>-Handler: Ollama format models
+    Handler-->>-Proxy: Tags response
+    Proxy-->>-Client: {"models": [...]}
+```
+
+## REST API Spec
+
 ```yaml
-# IMPORTANT: CI/CD implementation comes AFTER:
-# 1. All endpoints implemented and tested locally
-# 2. Full integration test suite passing locally
-# 3. Development team confident in stability
+openapi: 3.0.0
+info:
+  title: Ollama-to-OpenAI Proxy API
+  version: 1.0.0
+  description: Proxy service translating Ollama API calls to OpenAI
+servers:
+  - url: http://localhost:11434
+    description: Default Ollama port
 
-# NO CI/CD until local development is SOLID!
+paths:
+  /api/tags:
+    get:
+      summary: List available models
+      operationId: listModels
+      responses:
+        '200':
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          example: "gpt-3.5-turbo"
+                        modified_at:
+                          type: string
+                          format: date-time
+                        size:
+                          type: integer
+                          example: 1000000
+                        digest:
+                          type: string
+                          example: "sha256:dummy"
+
+  /api/generate:
+    post:
+      summary: Generate text completion
+      operationId: generateCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model
+                - prompt
+              properties:
+                model:
+                  type: string
+                  example: "gpt-3.5-turbo"
+                prompt:
+                  type: string
+                  example: "Why is the sky blue?"
+                stream:
+                  type: boolean
+                  default: true
+                options:
+                  type: object
+                  properties:
+                    temperature:
+                      type: number
+                      example: 0.7
+                    num_predict:
+                      type: integer
+                      example: 100
+      responses:
+        '200':
+          description: Generated text
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  model:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  response:
+                    type: string
+                  done:
+                    type: boolean
+
+  /api/chat:
+    post:
+      summary: Chat conversation
+      operationId: chatCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model
+                - messages
+              properties:
+                model:
+                  type: string
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      role:
+                        type: string
+                        enum: [system, user, assistant]
+                      content:
+                        type: string
+                stream:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Chat response
+
+  /api/embeddings:
+    post:
+      summary: Generate embeddings
+      operationId: createEmbeddings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model
+                - prompt
+              properties:
+                model:
+                  type: string
+                  example: "text-embedding-ada-002"
+                prompt:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+      responses:
+        '200':
+          description: Embeddings response
+
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  version:
+                    type: string
+                    example: "1.0.0"
 ```
 
-### 12.2 Future CI/CD Pipeline (Phase 2)
-- GitHub Actions for automated testing
-- Docker image building
-- Automated deployment
-- But NOT NOW - focus on local development first
+## Database Schema
 
-## 13. Architecture Learning Document
+Not applicable - This service operates entirely stateless without any database requirements, following the KISS principle.
 
-### 13.1 Learning Documentation
-```markdown
-# Each endpoint implementation should update:
-docs/architecture_learnings.md
+## Source Tree
 
-## Learnings from /api/tags
-- [Document surprises, challenges, solutions]
-- [Parameter mapping discoveries]
-- [Ollama SDK quirks found]
-
-## Learnings from /api/generate
-- [Streaming implementation insights]
-- [Parameter translation edge cases]
-- [Performance observations]
-
-# These learnings MUST be incorporated into next endpoint
+```plaintext
+ollama-openai-proxy/
+├── src/
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI application entry point
+│   ├── config.py                  # Configuration management
+│   ├── models/                    # Pydantic models
+│   │   ├── __init__.py
+│   │   ├── ollama.py             # Ollama request/response models
+│   │   └── openai.py             # OpenAI request/response models
+│   ├── handlers/                  # Endpoint handlers
+│   │   ├── __init__.py
+│   │   ├── tags.py               # /api/tags handler
+│   │   ├── generate.py           # /api/generate handler
+│   │   ├── chat.py               # /api/chat handler
+│   │   └── embeddings.py         # /api/embeddings handler
+│   ├── translators/              # Translation logic
+│   │   ├── __init__.py
+│   │   ├── request.py            # Ollama → OpenAI translation
+│   │   ├── response.py           # OpenAI → Ollama translation
+│   │   └── parameters.py         # Parameter mapping
+│   ├── clients/                  # External API clients
+│   │   ├── __init__.py
+│   │   └── openai_client.py     # OpenAI API wrapper
+│   ├── utils/                    # Utilities
+│   │   ├── __init__.py
+│   │   ├── errors.py             # Error handling
+│   │   └── logging.py            # Logging configuration
+│   └── middleware/               # FastAPI middleware
+│       ├── __init__.py
+│       └── logging.py            # Request/response logging
+├── tests/                        # Test suite
+│   ├── __init__.py
+│   ├── conftest.py              # Pytest configuration
+│   ├── unit/                    # Unit tests
+│   │   ├── test_translators.py
+│   │   ├── test_handlers.py
+│   │   └── test_models.py
+│   ├── integration/             # Integration tests
+│   │   ├── test_ollama_sdk.py  # Tests using Ollama SDK
+│   │   └── test_endpoints.py
+│   └── fixtures/                # Test fixtures
+│       ├── ollama_requests.json
+│       └── openai_responses.json
+├── scripts/                     # Development scripts
+│   ├── setup_dev.sh            # Development environment setup
+│   ├── run_tests.sh            # Run test suite
+│   └── run_local.sh            # Run local server
+├── docs/                       # Documentation
+│   ├── architecture.md         # This document
+│   ├── api.md                 # API documentation
+│   └── deployment.md          # Deployment guide
+├── docker/                    # Docker configuration
+│   ├── Dockerfile            # Production container
+│   └── Dockerfile.dev        # Development container
+├── .env.example              # Environment variable template
+├── .gitignore               # Git ignore file
+├── docker-compose.yml       # Container orchestration
+├── requirements.txt         # Python dependencies
+├── requirements-dev.txt     # Development dependencies
+├── pyproject.toml          # Python project configuration
+├── setup.py                # Package setup
+└── README.md               # Project documentation
 ```
 
-## 14. Future Considerations (NOT FOR PHASE 1)
+## Infrastructure and Deployment
 
-### 14.1 Out of Scope for Current Development
+### Infrastructure as Code
+
+- **Tool:** Docker 24.0.7 & docker-compose 2.23.3
+- **Location:** `docker/` and `docker-compose.yml`
+- **Approach:** Container-based deployment with environment variable configuration
+
+### Deployment Strategy
+
+- **Strategy:** Rolling update with Docker Compose
+- **CI/CD Platform:** Manual deployment (automated CI/CD out of scope for Phase 1)
+- **Pipeline Configuration:** `scripts/deploy.sh` (to be created)
+
+### Environments
+
+- **Development:** Local Docker container with hot-reload enabled - Port 11434, debug logging
+- **Testing:** Docker container with test configuration - Isolated network, test OpenAI credentials
+- **Production:** Optimized Docker container - Port 11434, JSON structured logging, restart policy
+
+### Environment Promotion Flow
+
 ```
-IMPORTANT: These are ideas for FUTURE phases only
-Do NOT implement any of these in Phase 1:
-
-- Circuit breaker patterns
-- Retry logic with exponential backoff
-- Fallback responses or caching
-- Multi-provider support (Anthropic, Cohere)
-- Request caching
-- Advanced model routing  
-- Load balancing
-- WebSocket support
-- Multi-tenancy
-- Advanced monitoring
-- Kubernetes manifests
-- CI/CD pipelines
-
-If it's listed here, it's FORBIDDEN in Phase 1
-Focus on the core proxy functionality ONLY
-```
-
-### 14.2 Phase 1 Scope Reminder
-```
-Phase 1 includes ONLY:
-- Four endpoints: /api/tags, /api/generate, /api/chat, /api/embeddings
-- Basic error handling
-- Simple environment variable configuration
-- Ollama SDK compatibility
-- Basic logging for debugging
-
-Nothing else. Keep it simple.
+Development (local) → Testing (docker) → Production (docker)
+    ↓                    ↓                    ↓
+  Manual              Manual              Manual
+  Testing             Validation          Deployment
 ```
 
-## 16. Appendix: Development Prerequisites
+### Rollback Strategy
 
-### 16.1 Before Starting Development
-```
-Critical Requirements:
-- Ollama API specification is available in: docs/Ollama REST API.postman_collection.json
-- Pydantic models must be generated from the Postman collection examples
-- Models must be validated against Ollama SDK
-- Test fixtures must be created from the Postman collection
+- **Primary Method:** Docker image rollback to previous version
+- **Trigger Conditions:** Health check failures, high error rate, manual intervention
+- **Recovery Time Objective:** < 5 minutes
 
-The Postman collection provides:
-- Complete API endpoint documentation
-- Real request/response examples
-- All supported parameters and options
-- Error response formats
+## Error Handling Strategy
 
-The development team should:
-- Import the Postman collection for API testing
-- Use the examples to generate accurate Pydantic models
-- Create test fixtures from the collection examples
-- Validate compatibility with Ollama SDK
-```
+### General Approach
+
+- **Error Model:** Centralized error handling with consistent response format
+- **Exception Hierarchy:** Custom exceptions for Ollama/OpenAI translation errors
+- **Error Propagation:** Catch at handler level, translate, return appropriate HTTP status
+
+### Logging Standards
+
+- **Library:** structlog 24.1.0
+- **Format:** JSON structured logging
+- **Levels:** DEBUG, INFO, WARNING, ERROR
+- **Required Context:**
+  - Correlation ID: UUID per request
+  - Service Context: endpoint, method, duration
+  - User Context: No PII, only model name and request type
+
+### Error Handling Patterns
+
+#### External API Errors
+
+- **Retry Policy:** No automatic retry (KISS principle)
+- **Circuit Breaker:** Not implemented in Phase 1
+- **Timeout Configuration:** 30 seconds for OpenAI API calls
+- **Error Translation:** Map OpenAI errors to Ollama error format
+
+#### Business Logic Errors
+
+- **Custom Exceptions:** TranslationError, UnsupportedParameterError
+- **User-Facing Errors:** Simple error messages without internal details
+- **Error Codes:** HTTP status codes only (400, 404, 500, 502)
+
+#### Data Consistency
+
+- **Transaction Strategy:** N/A (stateless service)
+- **Compensation Logic:** N/A (no state modifications)
+- **Idempotency:** All endpoints naturally idempotent
+
+## Coding Standards
+
+### Core Standards
+
+- **Languages & Runtimes:** Python 3.12.3
+- **Style & Linting:** black (formatting), flake8 (linting), mypy (type checking)
+- **Test Organization:** tests/{unit,integration}/test_*.py pattern
+
+### Naming Conventions
+
+| Element | Convention | Example |
+|---------|------------|---------|
+| Files | snake_case | request_translator.py |
+| Classes | PascalCase | RequestTranslator |
+| Functions | snake_case | translate_request |
+| Constants | UPPER_SNAKE | MAX_RETRIES |
+| Test files | test_*.py | test_translator.py |
+
+### Critical Rules
+
+- **Logging:** Never use print() - always use structured logger
+- **Secrets:** Never log API keys or sensitive data
+- **Error Handling:** All endpoints must have explicit error handling
+- **Type Hints:** All functions must have type hints
+- **Docstrings:** All public functions must have docstrings
+- **Async:** Use async/await for all I/O operations
+
+## Test Strategy and Standards
+
+### Testing Philosophy
+
+- **Approach:** Test-after development with comprehensive coverage
+- **Coverage Goals:** 80% minimum coverage, 100% for translation logic
+- **Test Pyramid:** 60% unit, 30% integration, 10% end-to-end
+
+### Test Types and Organization
+
+#### Unit Tests
+
+- **Framework:** pytest 8.0.0
+- **File Convention:** test_<module_name>.py
+- **Location:** tests/unit/
+- **Mocking Library:** pytest-mock
+- **Coverage Requirement:** 80% minimum
+
+**AI Agent Requirements:**
+- Generate tests for all public methods
+- Cover edge cases and error conditions
+- Follow AAA pattern (Arrange, Act, Assert)
+- Mock all external dependencies
+
+#### Integration Tests
+
+- **Scope:** API endpoint testing with Ollama SDK client
+- **Location:** tests/integration/
+- **Test Infrastructure:**
+  - **OpenAI API:** Mock responses via pytest fixtures
+  - **HTTP Server:** Test client via FastAPI TestClient
+
+#### End-to-End Tests
+
+- **Framework:** pytest 8.0.0 with real OpenAI API
+- **Scope:** Full request/response flow with actual API
+- **Environment:** Requires .env with valid OPENAI_API_KEY
+- **Test Data:** Minimal API calls to control costs
+
+### Test Data Management
+
+- **Strategy:** Fixtures from Postman collection examples
+- **Fixtures:** tests/fixtures/*.json
+- **Factories:** Not required (simple data structures)
+- **Cleanup:** No cleanup needed (stateless)
+
+### Continuous Testing
+
+- **CI Integration:** Run all tests before deployment
+- **Performance Tests:** Basic load test with locust (Epic 3)
+- **Security Tests:** Dependency scanning with pip-audit
+
+## Security
+
+### Input Validation
+
+- **Validation Library:** Pydantic (built-in with FastAPI)
+- **Validation Location:** At API boundary via Pydantic models
+- **Required Rules:**
+  - All external inputs MUST be validated
+  - Validation at API boundary before processing
+  - Whitelist approach preferred over blacklist
+
+### Authentication & Authorization
+
+- **Auth Method:** API key via environment variable (OpenAI)
+- **Session Management:** Stateless - no sessions
+- **Required Patterns:**
+  - API key must be loaded from environment only
+  - Never expose API key in logs or responses
+
+### Secrets Management
+
+- **Development:** .env file (never committed)
+- **Production:** Environment variables via Docker
+- **Code Requirements:**
+  - NEVER hardcode secrets
+  - Access via configuration service only
+  - No secrets in logs or error messages
+
+### API Security
+
+- **Rate Limiting:** Not implemented (Phase 1 KISS)
+- **CORS Policy:** Disabled (backend service only)
+- **Security Headers:** Default FastAPI security headers
+- **HTTPS Enforcement:** Handled by deployment infrastructure
+
+### Data Protection
+
+- **Encryption at Rest:** N/A (no data storage)
+- **Encryption in Transit:** HTTPS to OpenAI API
+- **PII Handling:** No PII storage, prompts not logged
+- **Logging Restrictions:** No request/response bodies in logs
+
+### Dependency Security
+
+- **Scanning Tool:** pip-audit
+- **Update Policy:** Monthly security updates
+- **Approval Process:** Review all new dependencies
+
+### Security Testing
+
+- **SAST Tool:** bandit (Python security linter)
+- **DAST Tool:** Not required (API only)
+- **Penetration Testing:** Not planned for Phase 1
+
+## Checklist Results Report
+
+*To be completed after architecture validation*
+
+## Next Steps
+
+### For All Projects:
+1. Review this architecture with Product Owner
+2. Set up development environment per Story 1.1
+3. Begin Ollama API contract analysis per Story 1.2
+4. Implement endpoints incrementally per Epic 2
+5. Prepare for production deployment per Epic 3
+
+### Specific Development Prompts:
+- **Developer Agent:** "Implement the Ollama-to-OpenAI proxy service following the architecture document. Start with Story 1.1 (Project Infrastructure Setup) and follow the incremental development approach. Pay special attention to Story 1.2 (Ollama API Contract Analysis) as it's a blocker for all endpoint development."
+- **DevOps Agent:** "Set up Docker containers and docker-compose configuration for the Ollama proxy service as specified in the architecture. Focus on development environment first, then production optimization."
