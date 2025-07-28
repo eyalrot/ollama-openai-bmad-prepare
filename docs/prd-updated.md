@@ -17,6 +17,7 @@ Organizations have invested significantly in applications built with Ollama SDK.
 |------|---------|-------------|--------|
 | 2024-01-28 | 1.0 | Initial PRD creation | Product Owner |
 | 2024-01-28 | 1.1 | Added epics, stories, and technical assumptions | Sarah (PO) |
+| 2024-01-28 | 1.2 | Added API key provisioning and rate limit handling per PO checklist | Sarah (PO) |
 
 ## 2. Requirements
 
@@ -124,15 +125,20 @@ Finalize deployment configuration, documentation, basic monitoring, and load tes
 **I want** the OpenAI client integration set up and tested,  
 **So that** endpoint implementations can focus on translation logic.
 
-**Prerequisites**: Story 1.2 must be complete
+**Prerequisites**: 
+- Story 1.2 must be complete
+- User has created OpenAI account and obtained API key
 
 **Acceptance Criteria:**
 1: OpenAI Python SDK integrated and configured
 2: Environment variable configuration system implemented
-3: Basic OpenAI client wrapper with error handling created
-4: Connection testing with actual OpenAI API (using .env credentials)
-5: Model listing functionality verified
-6: Streaming response handling prototype tested
+3: Instructions documented for user to create .env file with OPENAI_API_KEY
+4: Example .env.example file created with required variables
+5: Basic OpenAI client wrapper with error handling created
+6: Connection testing with actual OpenAI API (using .env credentials)
+7: API rate limit handling strategy implemented
+8: Model listing functionality verified
+9: Streaming response handling prototype tested
 
 ### Epic 2: Core Proxy Endpoints
 **Goal**: Implement all four required Ollama endpoints with complete translation logic. Each endpoint is developed incrementally with full testing, allowing lessons learned from each to improve the next implementation.
@@ -170,7 +176,7 @@ Finalize deployment configuration, documentation, basic monitoring, and load tes
 4: Streaming mode fully functional with proper chunk formatting
 5: Non-streaming mode returns complete response
 6: Integration tests pass for all Ollama SDK generate features
-7: Error responses properly translated
+7: Error responses properly translated including rate limit (429) errors
 8: Performance verified < 50ms overhead
 9: Unit tests achieve >80% coverage
 
