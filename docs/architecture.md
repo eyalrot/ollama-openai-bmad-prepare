@@ -99,8 +99,10 @@ class ModelInfo(BaseModel):
 
 #### 2.2.1 Pydantic Model Generation (CRITICAL FIRST STEP)
 ```
-IMPORTANT: All Ollama API models MUST be generated from Ollama's swagger specification
+IMPORTANT: All Ollama API models MUST be generated from the Postman collection
+- Reference: docs/Ollama REST API.postman_collection.json
 - Do NOT hand-write these models
+- Use the Postman examples to generate accurate Pydantic models
 - Must match exactly what Ollama SDK sends/expects
 - Any mismatch will cause integration test failures
 - This is the FIRST development story
@@ -499,10 +501,20 @@ ollama-openai-proxy/
 #### Phase 0: Ollama API Contract Analysis (FIRST STORY)
 ```
 PREREQUISITE: Understand Ollama's exact API contract
-- Obtain Ollama server swagger/OpenAPI specification  
-- Generate Pydantic models from the specification
+
+IMPORTANT: A Postman collection is available at:
+docs/Ollama REST API.postman_collection.json
+
+This collection contains real Ollama API examples and can be used to:
+- Understand the exact request/response formats
+- Generate test fixtures from actual Ollama responses
+- Validate our Pydantic models against real API behavior
+
+Steps:
+- Review the Postman collection for all endpoint specifications
+- Generate Pydantic models from the API examples
 - Validate models against Ollama SDK expectations
-- Create test fixtures from real Ollama responses
+- Create test fixtures from the Postman examples
 
 This MUST be completed before ANY endpoint implementation
 Expected deliverables:
@@ -773,14 +785,20 @@ Nothing else. Keep it simple.
 ### 16.1 Before Starting Development
 ```
 Critical Requirements:
-- Ollama swagger.json must be obtained and analyzed
-- Pydantic models must be generated (not hand-written)
+- Ollama API specification is available in: docs/Ollama REST API.postman_collection.json
+- Pydantic models must be generated from the Postman collection examples
 - Models must be validated against Ollama SDK
-- Test fixtures must be created from real Ollama server
+- Test fixtures must be created from the Postman collection
 
-The development team will determine the best approach for:
-- Obtaining the Ollama API specification
-- Generating accurate Pydantic models
-- Creating comprehensive test fixtures
-- Validating compatibility
+The Postman collection provides:
+- Complete API endpoint documentation
+- Real request/response examples
+- All supported parameters and options
+- Error response formats
+
+The development team should:
+- Import the Postman collection for API testing
+- Use the examples to generate accurate Pydantic models
+- Create test fixtures from the collection examples
+- Validate compatibility with Ollama SDK
 ```
